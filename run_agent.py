@@ -35,7 +35,7 @@ def fetch_transfer_news(club_name: str, max_articles: int = 5):
 
 # 3. Main Runner Function
 def main():
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY_2")
     if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is missing!")
 
