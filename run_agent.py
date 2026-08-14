@@ -7,15 +7,16 @@ from pydantic import BaseModel, Field
 
 TARGET_CLUB = "Nottingham Forest"
 
+# 1. Define Output Schema
 class TransferAnalysis(BaseModel):
-    player: str = Field(description="Name of the player linked")
+    player: str = Field(description="Name of the player linked. Return 'None' if no specific player is mentioned.")
     linked_club: str = Field(description="Club the player is rumored to join")
-    current_club: str = Field(description="Player's current club if mentioned, else Unknown")
     likelihood_score: int = Field(description="Probability 0 to 100 based on source reliability and language")
-    status: str = Field(description="e.g. Speculation, Advanced Talks, Medical Booked, Done Deal")
-    justification: str = Field(description="1-2 sentences explaining why the score was given")
+    status: str = Field(description="Short status e.g. Speculation, Advanced Talks, Done Deal, No Transfer")
+    justification: str = Field(description="A single clear English sentence explaining the score. DO NOT output JSON or dicts here.")
 
-def fetch_transfer_news(club_name: str, max_articles: int = 5):
+# 2. Fetch News via Google RSS
+def fetch_transfer_news(club_name: str, max_articles: int = 8):
     encoded_query = f"{club_name}+transfer+rumors".replace(" ", "+")
     rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
     
@@ -30,8 +31,8 @@ def fetch_transfer_news(club_name: str, max_articles: int = 5):
         })
     return articles
 
+# 3. Main Script
 def main():
-    # Fallback check across common key naming variations
     api_key = (
         os.environ.get("GROQ_API_KEY2") 
         or os.environ.get("GROQ_API_KEY") 
@@ -40,45 +41,65 @@ def main():
     ).strip()
 
     if not api_key:
-        print("❌ CRITICAL ERROR: Could not find GROQ_API_KEY2 in environment variables.")
+        print("❌ CRITICAL ERROR: GROQ_API_KEY is missing.")
         return
 
     client = Groq(api_key=api_key)
-    articles = fetch_transfer_news(TARGET_CLUB, max_articles=5)
+    articles = fetch_transfer_news(TARGET_CLUB, max_articles=8)
 
     if not articles:
-        print("No news articles found.")
+        print("No articles found.")
         return
 
     data_rows = []
 
     for art in articles:
         prompt = f"""
-        Analyze the following football news headline for potential transfers involving {TARGET_CLUB}.
+        Analyze this football news headline for potential transfers involving {TARGET_CLUB}:
         
         Source: {art['source']}
         Headline: {art['title']}
         
-        Evaluate source reliability and wording urgency. Output a JSON object with player, linked_club, current_club, likelihood_score (0-100), status, and justification.
+        Extract information matching the JSON schema. Ensure 'justification' is strictly a plain English sentence, NOT a JSON or key-value object.
         """
 
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are an elite football transfer credibility analyst. Respond ONLY with valid JSON matching the schema."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "You are a football transfer analyst. Respond ONLY with valid JSON matching the specified schema."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
 
-        res = json.loads(response.choices[0].message.content)
-        data_rows.append({
-            "Player": res.get("player", "N/A"),
-            "Source Media": art['source'],
-            "Likelihood": f"{res.get('likelihood_score', 0)}%",
-            "Status": res.get("status", "N/A"),
-            "Justification": res.get("justification", "N/A")
-        })
+            res = json.loads(response.choices[0].message.content)
+            player_name = res.get("player", "None")
+
+            # Filter out non-transfer news or unidentifiable players
+            if not player_name or player_name.lower() in ["none", "nan", "unknown", "n/a"]:
+                continue
+
+            # Ensure justification is a string if the model returned a dict
+            justification_val = res.get("justification", "")
+            if isinstance(justification_val, dict):
+                justification_val = ". ".join([f"{k.replace('_', ' ').capitalize()}: {v}" for k, v in justification_val.items()])
+
+            data_rows.append({
+                "Player": player_name,
+                "Source Media": art['source'],
+                "Likelihood": f"{res.get('likelihood_score', 0)}%",
+                "Status": res.get("status", "N/A"),
+                "Justification": str(justification_val)
+            })
+
+        except Exception as e:
+            print(f"Skipping article due to parsing error: {e}")
+            continue
+
+    if not data_rows:
+        print("No valid player transfer rumors detected.")
+        return
 
     df = pd.DataFrame(data_rows)
 
@@ -89,7 +110,7 @@ def main():
     with open("TRANSFER_REPORT.md", "w") as f:
         f.write(markdown_report)
 
-    print("TRANSFER_REPORT.md generated successfully!")
+    print("TRANSFER_REPORT.md updated successfully!")
 
 if __name__ == "__main__":
     main()
