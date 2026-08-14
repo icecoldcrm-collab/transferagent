@@ -3,4 +3,7 @@ groq
 pydantic
 pandas
 tabulate
+xgboost
+scikit-learn
 joblib
+numpy
