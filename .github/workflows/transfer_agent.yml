@@ -2,16 +2,14 @@ name: AI Transfer Agent
 
 on:
   schedule:
-    # Runs automatically every day at 08:00 AM UTC
     - cron: '0 8 * * *'
-  # Allows manual triggers directly from the GitHub Actions web UI
   workflow_dispatch:
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Needed to allow pushing generated TRANSFER_REPORT.md back to repo
+      contents: write
 
     steps:
       - name: Checkout Code
@@ -29,7 +27,7 @@ jobs:
 
       - name: Run AI Agent Analysis
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY2 }}
+          GROQ_API_KEY2: ${{ secrets.GROQ_API_KEY2 }}
         run: python run_agent.py
 
       - name: Commit and Push Report back to Repository
