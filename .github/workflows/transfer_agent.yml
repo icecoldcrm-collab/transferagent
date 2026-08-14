@@ -1,0 +1,41 @@
+name: AI Transfer Agent
+
+on:
+  schedule:
+    # Runs automatically every day at 08:00 AM UTC
+    - cron: '0 8 * * *'
+  # Allows manual triggers directly from the GitHub Actions web UI
+  workflow_dispatch:
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed to allow pushing generated TRANSFER_REPORT.md back to repo
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run AI Agent Analysis
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python run_agent.py
+
+      - name: Commit and Push Report back to Repository
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add TRANSFER_REPORT.md
+          git commit -m "Auto-update transfer report [skip ci]" || exit 0
+          git push
