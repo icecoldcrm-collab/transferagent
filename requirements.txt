@@ -2,3 +2,4 @@ feedparser
 groq
 pydantic
 pandas
+tabulate
