@@ -5,10 +5,8 @@ import pandas as pd
 from groq import Groq
 from pydantic import BaseModel, Field
 
-# Target club to track (Change this to any team)
 TARGET_CLUB = "Nottingham Forest"
 
-# 1. Define Output Schema
 class TransferAnalysis(BaseModel):
     player: str = Field(description="Name of the player linked")
     linked_club: str = Field(description="Club the player is rumored to join")
@@ -17,7 +15,6 @@ class TransferAnalysis(BaseModel):
     status: str = Field(description="e.g. Speculation, Advanced Talks, Medical Booked, Done Deal")
     justification: str = Field(description="1-2 sentences explaining why the score was given")
 
-# 2. Fetch Google News RSS
 def fetch_transfer_news(club_name: str, max_articles: int = 5):
     encoded_query = f"{club_name}+transfer+rumors".replace(" ", "+")
     rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
@@ -33,11 +30,18 @@ def fetch_transfer_news(club_name: str, max_articles: int = 5):
         })
     return articles
 
-# 3. Main Runner Function
 def main():
-    api_key = os.environ.get("GROQ_API_KEY2")
+    # Fallback check across common key naming variations
+    api_key = (
+        os.environ.get("GROQ_API_KEY2") 
+        or os.environ.get("GROQ_API_KEY") 
+        or os.environ.get("GROQ_API_KEY_2") 
+        or ""
+    ).strip()
+
     if not api_key:
-        raise ValueError("GROQ_API_KEY2 environment variable is missing!")
+        print("❌ CRITICAL ERROR: Could not find GROQ_API_KEY2 in environment variables.")
+        return
 
     client = Groq(api_key=api_key)
     articles = fetch_transfer_news(TARGET_CLUB, max_articles=5)
@@ -78,7 +82,6 @@ def main():
 
     df = pd.DataFrame(data_rows)
 
-    # Export markdown table for GitHub display
     markdown_report = f"# ⚽ Daily Transfer Identification Matrix for {TARGET_CLUB}\n\n"
     markdown_report += f"*Last Updated: Automated via GitHub Actions*\n\n"
     markdown_report += df.to_markdown(index=False)
