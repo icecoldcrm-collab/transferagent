@@ -3,3 +3,4 @@ groq
 pydantic
 pandas
 tabulate
+joblib
