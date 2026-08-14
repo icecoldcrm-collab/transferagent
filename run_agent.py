@@ -11,14 +11,14 @@ try:
     import joblib
 except ModuleNotFoundError:
     raise ModuleNotFoundError(
-        "❌ Missing package 'joblib'. Install it via 'pip install joblib' or update requirements.txt"
+        "❌ Missing package 'joblib'. Install it via 'pip install joblib'"
     )
 
 try:
     from xgboost import XGBClassifier
 except ModuleNotFoundError:
     raise ModuleNotFoundError(
-        "❌ Missing package 'xgboost'. Install it via 'pip install xgboost' or update requirements.txt"
+        "❌ Missing package 'xgboost'. Install it via 'pip install xgboost'"
     )
 
 try:
@@ -40,7 +40,6 @@ PREMIER_LEAGUE_CLUBS = [
     "West Ham", "Wolves"
 ]
 
-# Verified Premier League Ground Truth Database
 COMPLETED_TRANSFERS = {
     ("Ousmane Diomande", "Nottingham Forest"): True,
     ("Bruno Guimaraes", "Arsenal"): True,
@@ -61,10 +60,10 @@ MODEL_FILE = "transfer_model.pkl"
 class TransferFeatures(BaseModel):
     player: str = Field(description="Name of the player linked, or 'None' if unavailable.")
     buying_club: str = Field(description="Premier League team rumored to sign the player.")
-    source_tier: int = Field(description="1 for top-tier (Athletic, Sky, Romano), 2 for mid-tier, 3 for low/tabloid.")
-    urgency_level: int = Field(description="1 (interest/monitoring), 2 (negotiations), 3 (advanced), 4 (medical/done).")
-    mention_frequency: int = Field(description="Estimated number of separate outlets covering this rumor (1 to 5).")
-    status: str = Field(description="Short status string e.g., Speculation, Advanced Talks, Medical Scheduled.")
+    source_tier: int = Field(description="1 for top-tier, 2 for mid-tier, 3 for low/tabloid.")
+    urgency_level: int = Field(description="1 (interest), 2 (negotiations), 3 (advanced), 4 (medical/done).")
+    mention_frequency: int = Field(description="Estimated number of outlets covering this rumor (1 to 5).")
+    status: str = Field(description="Short status string e.g., Speculation, Advanced Talks.")
     justification: str = Field(description="One concise English sentence explaining the extracted tier and urgency.")
 
 # -------------------------------------------------------------------
@@ -86,18 +85,15 @@ def fetch_club_news(club_name: str, max_articles: int = 2) -> list:
     return articles
 
 # -------------------------------------------------------------------
-# 5. XGBoost Inference Engine (Loads pretrained model or trains fallback)
+# 5. XGBoost Inference Engine
 # -------------------------------------------------------------------
 def get_xgboost_model():
     if os.path.exists(MODEL_FILE):
         try:
-            print(f"📦 Loading pre-trained model from {MODEL_FILE}...")
             return joblib.load(MODEL_FILE)
-        except Exception as e:
-            print(f"⚠️ Could not load {MODEL_FILE}: {e}. Initializing inline fallback.")
+        except Exception:
+            pass
 
-    print("⚡ Initializing and fitting baseline XGBoost model...")
-    # Training set matching [source_tier, urgency_level, mention_frequency]
     X_train = np.array([
         [1, 4, 5], [1, 3, 4], [2, 3, 3], [1, 2, 3],
         [2, 2, 2], [3, 1, 1], [3, 2, 1], [1, 1, 2]
@@ -117,15 +113,19 @@ def get_xgboost_model():
 # 6. Main Pipeline Execution
 # -------------------------------------------------------------------
 def main():
-    api_key = (
-        os.environ.get("GROQ_API_KEY2") 
+    # Retrieve and thoroughly sanitize secret key variable including GROQ_API_KEY3
+    raw_key = (
+        os.environ.get("GROQ_API_KEY3")
+        or os.environ.get("GROQ_API_KEY2") 
         or os.environ.get("GROQ_API_KEY") 
         or os.environ.get("GROQ_API_KEY_2") 
         or ""
-    ).strip()
+    )
+    
+    api_key = raw_key.strip().strip("'").strip('"')
 
     if not api_key:
-        print("❌ CRITICAL ERROR: GROQ_API_KEY is missing from environment variables.")
+        print("❌ CRITICAL ERROR: GROQ_API_KEY3 or valid API key is missing from environment variables.")
         return
 
     client = Groq(api_key=api_key)
@@ -168,23 +168,19 @@ def main():
             res = json.loads(response.choices[0].message.content)
             player = res.get("player", "None")
 
-            # Filter invalid or non-existent extractions
             if not player or player.lower() in ["none", "nan", "unknown", "n/a"]:
                 continue
 
             buying_club = res.get("buying_club", art['club'])
             
-            # Extract features for XGBoost probability prediction
             s_tier = int(res.get("source_tier", 3))
             u_level = int(res.get("urgency_level", 1))
             m_freq = int(res.get("mention_frequency", 1))
 
-            # Run inference
             features = np.array([[s_tier, u_level, m_freq]])
             xgb_prob = xgb_model.predict_proba(features)[0][1]
             calibrated_score = int(xgb_prob * 100)
 
-            # Ground truth cross-check
             is_done = COMPLETED_TRANSFERS.get((player, buying_club), False)
 
             dataset.append({
@@ -199,18 +195,16 @@ def main():
             })
 
         except Exception as e:
-            print(f"Skipping article processing: {e}")
             continue
 
     if not dataset:
         print("⚠️ No valid transfer rumors were extracted from current feeds.")
         return
 
-    # Build DataFrame and write Markdown report
     df = pd.DataFrame(dataset)
     
     markdown_report = "# ⚽ Premier League Transfer Reliability Matrix (LLM + XGBoost)\n\n"
-    markdown_report += "*Updated daily via GitHub Actions | Model: Llama 3.3 70B + XGBoost Classifier*\n\n"
+    markdown_report += "*Updated via GitHub Actions | Model: Llama 3.3 70B + XGBoost Classifier*\n\n"
     markdown_report += df.to_markdown(index=False)
 
     with open("TRANSFER_REPORT.md", "w", encoding="utf-8") as f:
