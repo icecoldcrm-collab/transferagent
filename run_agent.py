@@ -6,7 +6,7 @@ from groq import Groq
 from pydantic import BaseModel, Field
 
 # Target club to track (Change this to any team)
-TARGET_CLUB = "Arsenal"
+TARGET_CLUB = "Nottingham Forest"
 
 # 1. Define Output Schema
 class TransferAnalysis(BaseModel):
