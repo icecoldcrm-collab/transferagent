@@ -33,7 +33,6 @@ PREMIER_LEAGUE_CLUBS = [
     "West Ham", "Wolves"
 ]
 
-# Ground Truth Verification DB
 COMPLETED_TRANSFERS = {
     ("Ousmane Diomande", "Nottingham Forest"): True,
     ("Bruno Guimaraes", "Arsenal"): True,
@@ -44,21 +43,38 @@ COMPLETED_TRANSFERS = {
 MODEL_FILE = "transfer_model.pkl"
 
 # -------------------------------------------------------------------
-# 3. RSS Data Scraper (Supports multi-language & global sources)
+# 3. Multinational & Domestic RSS Scraper Engine
 # -------------------------------------------------------------------
-def fetch_club_news(club_name: str, max_articles: int = 3) -> list:
-    query = f"{club_name}+transfer+rumors".replace(" ", "+")
-    rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
-    feed = feedparser.parse(rss_url)
+def fetch_multinational_news(club_name: str) -> list:
+    """
+    Scrapes feeds across multiple regional parameters (US, Spain, Italy, Germany) 
+    to capture foreign media breaks and direct domestic reports.
+    """
+    regions = [
+        {"hl": "en-US", "gl": "US", "ceid": "US:en", "suffix": "transfer rumors"},
+        {"hl": "es", "gl": "ES", "ceid": "ES:es", "suffix": "fichajes rumores"},
+        {"hl": "it", "gl": "IT", "ceid": "IT:it", "suffix": "calciomercato news"},
+        {"hl": "de", "gl": "DE", "ceid": "DE:de", "suffix": "transfergerüchte"}
+    ]
     
     articles = []
-    for entry in feed.entries[:max_articles]:
-        articles.append({
-            "title": entry.title,
-            "source": entry.source.title if hasattr(entry, "source") else "Media Outlet",
-            "link": entry.link,
-            "club": club_name
-        })
+    seen_links = set()
+
+    for reg in regions:
+        query = f"{club_name}+{reg['suffix']}".replace(" ", "+")
+        rss_url = f"https://news.google.com/rss/search?q={query}&hl={reg['hl']}&gl={reg['gl']}&ceid={reg['ceid']}"
+        feed = feedparser.parse(rss_url)
+        
+        # Take top 1 article per region to ensure diverse global coverage
+        for entry in feed.entries[:1]:
+            if entry.link not in seen_links:
+                seen_links.add(entry.link)
+                articles.append({
+                    "title": entry.title,
+                    "source": entry.source.title if hasattr(entry, "source") else f"Global Media ({reg['gl']})",
+                    "link": entry.link,
+                    "club": club_name
+                })
     return articles
 
 # -------------------------------------------------------------------
@@ -100,23 +116,23 @@ def main():
     client = Groq(api_key=api_key)
     xgb_model = get_xgboost_model()
 
-    print(f"🔍 Fetching and analyzing news feeds for all {len(PREMIER_LEAGUE_CLUBS)} Premier League clubs...")
+    print(f"🌍 Fetching international & domestic feeds for all {len(PREMIER_LEAGUE_CLUBS)} clubs...")
     
     dataset = []
 
     for club in PREMIER_LEAGUE_CLUBS:
-        articles = fetch_club_news(club, max_articles=2)
+        articles = fetch_multinational_news(club)
         for art in articles:
             prompt = f"""
-            Analyze this football transfer headline (which may be in English or international media):
+            Analyze this football transfer headline (which may originate from English, Spanish, Italian, or German media):
             Target Club Context: {art['club']}
             Source Media: {art['source']}
             Headline: {art['title']}
 
-            Return a valid JSON object with keys:
+            Translate or interpret context accurately and return a valid JSON object with keys:
             - "player": Exact player name or "None"
             - "buying_club": Target Premier League club name
-            - "source_tier": integer 1 (reliable/tier-1), 2 (mid), 3 (tabloid)
+            - "source_tier": integer 1 (tier-1 global/local reliable source like Marca, Di Marzio, Sky), 2 (mid), 3 (tabloid)
             - "urgency_level": integer 1 (rumor) to 4 (done/medical)
             - "mention_frequency": integer 1 to 5
             - "status": short description string (e.g. "Advanced Talks", "Completed", "Rumor")
@@ -127,7 +143,7 @@ def main():
                 response = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
-                        {"role": "system", "content": "You are a precise data extraction engine. Output ONLY valid JSON."},
+                        {"role": "system", "content": "You are a precise multilingual data extraction engine. Output ONLY valid JSON."},
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"}
@@ -145,14 +161,15 @@ def main():
                 m_freq = int(res.get("mention_frequency", 1))
 
                 xgb_prob = xgb_model.predict_proba(np.array([[s_tier, u_level, m_freq]]))[0][1]
-                likelihood = int(xgb_prob * 100)
+                likelihood_val = int(xgb_prob * 100)
                 is_done = COMPLETED_TRANSFERS.get((player, buying_club), False)
 
                 dataset.append({
                     "Club": buying_club,
                     "Player": player,
                     "Source": art['source'],
-                    "Likelihood": f"{likelihood}%",
+                    "_Likelihood_Raw": likelihood_val,  # Used for accurate numeric sorting
+                    "Likelihood": f"{likelihood_val}%",
                     "Status": "Completed" if is_done else res.get("status", "Rumor"),
                     "Justification": res.get("justification", ""),
                     "Link": f"[Source]({art['link']})"
@@ -167,14 +184,17 @@ def main():
 
     df = pd.DataFrame(dataset)
     
+    # Sort matrix entries from highest likelihood to lowest
+    df = df.sort_values(by="_Likelihood_Raw", ascending=False).drop(columns=["_Likelihood_Raw"])
+    
     report = "# ⚽ Comprehensive Premier League Transfer Intelligence Matrix\n\n"
-    report += f"*Automated analysis covering all {len(PREMIER_LEAGUE_CLUBS)} clubs via Llama 3.3 + XGBoost.*\n\n"
+    report += f"*Sorted by AI Likelihood Score — Multilingual engine covering international & domestic media for {len(PREMIER_LEAGUE_CLUBS)} clubs.*\n\n"
     report += df.to_markdown(index=False)
 
     with open("TRANSFER_REPORT.md", "w", encoding="utf-8") as f:
         f.write(report)
 
-    print("✅ TRANSFER_REPORT.md updated successfully for all clubs!")
+    print("✅ TRANSFER_REPORT.md updated, sorted by likelihood, and infused with global media sources!")
 
 if __name__ == "__main__":
     main()
