@@ -3,13 +3,12 @@ name: AI Transfer Agent
 on:
   schedule:
     - cron: '0 8 * * *' # Runs daily at 08:00 UTC
-  workflow_dispatch: # Allows manual runs from the Actions tab
+  workflow_dispatch: # Allows manual triggering from GitHub Actions tab
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
     
-    # Grants the GitHub Actions bot permission to write back to the repo
     permissions:
       contents: write
 
