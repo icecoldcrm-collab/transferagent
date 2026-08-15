@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 
 # -------------------------------------------------------------------
-# 1. Dependency Checks
+# 1. Dependency Checks & Exception Handling
 # -------------------------------------------------------------------
 try:
     import joblib
@@ -19,12 +19,11 @@ except ModuleNotFoundError:
 
 try:
     from groq import Groq
-    from pydantic import BaseModel, Field
 except ModuleNotFoundError:
-    raise ModuleNotFoundError("Missing package 'groq' or 'pydantic'. Install via 'pip install groq pydantic'")
+    raise ModuleNotFoundError("Missing package 'groq'. Install via 'pip install groq'")
 
 # -------------------------------------------------------------------
-# 2. Target Clubs Configuration
+# 2. Target Clubs Configuration & Ground Truth Database
 # -------------------------------------------------------------------
 PREMIER_LEAGUE_CLUBS = [
     "Arsenal", "Aston Villa", "Bournemouth", "Brentford", "Brighton",
@@ -34,25 +33,21 @@ PREMIER_LEAGUE_CLUBS = [
     "West Ham", "Wolves"
 ]
 
+# Ground Truth Verification DB
 COMPLETED_TRANSFERS = {
     ("Ousmane Diomande", "Nottingham Forest"): True,
     ("Bruno Guimaraes", "Arsenal"): True,
     ("Morgan Rogers", "Chelsea"): True,
-    ("Pep Chavarria", "Chelsea"): True,
-    ("Brennan Johnson", "Everton"): True,
-    ("Dwight McNeil", "Crystal Palace"): True,
-    ("Shea Charles", "Fulham"): True,
-    ("Ronald Araujo", "Liverpool"): True,
-    ("Geronimo Rulli", "Manchester City"): True
+    ("Savinho", "Manchester City"): True
 }
 
 MODEL_FILE = "transfer_model.pkl"
 
 # -------------------------------------------------------------------
-# 3. Data Scraper
+# 3. RSS Data Scraper (Supports multi-language & global sources)
 # -------------------------------------------------------------------
 def fetch_club_news(club_name: str, max_articles: int = 3) -> list:
-    query = f"{club_name}+transfer+news".replace(" ", "+")
+    query = f"{club_name}+transfer+rumors".replace(" ", "+")
     rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
     feed = feedparser.parse(rss_url)
     
@@ -99,7 +94,7 @@ def main():
     api_key = raw_key.strip().strip("'").strip('"')
 
     if not api_key:
-        print("❌ CRITICAL ERROR: API Key missing.")
+        print("❌ CRITICAL ERROR: API Key missing from environment variables.")
         return
 
     client = Groq(api_key=api_key)
@@ -113,19 +108,19 @@ def main():
         articles = fetch_club_news(club, max_articles=2)
         for art in articles:
             prompt = f"""
-            Analyze this football transfer headline:
-            Club Context: {art['club']}
-            Source: {art['source']}
+            Analyze this football transfer headline (which may be in English or international media):
+            Target Club Context: {art['club']}
+            Source Media: {art['source']}
             Headline: {art['title']}
 
             Return a valid JSON object with keys:
             - "player": Exact player name or "None"
             - "buying_club": Target Premier League club name
-            - "source_tier": integer 1 (reliable), 2 (mid), 3 (tabloid)
+            - "source_tier": integer 1 (reliable/tier-1), 2 (mid), 3 (tabloid)
             - "urgency_level": integer 1 (rumor) to 4 (done/medical)
             - "mention_frequency": integer 1 to 5
             - "status": short description string (e.g. "Advanced Talks", "Completed", "Rumor")
-            - "justification": single sentence explanation
+            - "justification": single sentence explanation written in English
             """
 
             try:
@@ -160,7 +155,7 @@ def main():
                     "Likelihood": f"{likelihood}%",
                     "Status": "Completed" if is_done else res.get("status", "Rumor"),
                     "Justification": res.get("justification", ""),
-                    "Link": f"[Link]({art['link']})"
+                    "Link": f"[Source]({art['link']})"
                 })
 
             except Exception:
@@ -172,7 +167,7 @@ def main():
 
     df = pd.DataFrame(dataset)
     
-    report = "# ⚽ Comprehensive Premier League Transfer Matrix\n\n"
+    report = "# ⚽ Comprehensive Premier League Transfer Intelligence Matrix\n\n"
     report += f"*Automated analysis covering all {len(PREMIER_LEAGUE_CLUBS)} clubs via Llama 3.3 + XGBoost.*\n\n"
     report += df.to_markdown(index=False)
 
